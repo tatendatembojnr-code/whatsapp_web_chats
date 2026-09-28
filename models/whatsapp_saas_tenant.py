@@ -64,7 +64,8 @@ class WhatsAppSaaSTenant(models.Model):
                     'id': str(t.id),
                     'name': t.name,
                     'phone': phone,
-                    'expiration_date': exp_date
+                    'expiration_date': exp_date,
+                    'create_date': getattr(t, 'create_date', False)
                 })
         elif account.saas_app_url:
             try:
@@ -88,12 +89,16 @@ class WhatsAppSaaSTenant(models.Model):
                         })
             except Exception as e:
                 _logger.error(f"Error fetching remote tenants from SaaS API: {e}")
+                
+        existing_tenant_ids = set(self.search([('account_id', '=', account.id)]).mapped('tenant_id'))
+        new_tenants_data = [t for t in tenants_data if t['id'] not in existing_tenant_ids]
+        is_bulk_import = len(new_tenants_data) > 3
+        
         for t_data in tenants_data:
             if not t_data.get('phone'):
                 continue
                 
-            existing = self.search([('account_id', '=', account.id), ('tenant_id', '=', t_data['id'])])
-            if not existing:
+            if t_data['id'] not in existing_tenant_ids:
                 new_tenant = self.create({
                     'account_id': account.id,
                     'tenant_id': t_data['id'],
@@ -101,8 +106,15 @@ class WhatsAppSaaSTenant(models.Model):
                     'tenant_phone': t_data['phone'],
                     'tenant_expiration_date': t_data.get('expiration_date'),
                 })
+                
+                should_send = not is_bulk_import
+                if t_data.get('create_date'):
+                    delta = fields.Datetime.now() - t_data['create_date']
+                    if delta.days > 1:
+                        should_send = False
+                
                 # Send welcome message upon new tenant discovery
-                if account.saas_welcome_template_id:
+                if should_send and account.saas_welcome_template_id:
                     self._send_whatsapp_message(
                         account, 
                         t_data['phone'], 
@@ -111,6 +123,7 @@ class WhatsAppSaaSTenant(models.Model):
                     )
                 new_tenant.welcome_message_sent = True
             else:
+                existing = self.search([('account_id', '=', account.id), ('tenant_id', '=', t_data['id'])], limit=1)
                 existing.write({
                     'tenant_phone': t_data['phone'],
                     'tenant_name': t_data['name'],

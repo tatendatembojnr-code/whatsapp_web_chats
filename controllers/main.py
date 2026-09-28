@@ -1,3 +1,8 @@
+import utils.net
+import utils.clients
+import utils.http_session
+import utils.transport
+import utils.session
 from odoo.addons.auth_signup.controllers.main import AuthSignupHome
 from odoo.http import request, route
 
